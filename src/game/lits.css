@@ -1,0 +1,189 @@
+/* ════════════════════════════════════════════════════════════════
+   LITS 四格骨墙 —— 游戏专用皮肤
+   ════════════════════════════════════════════════════════════════ */
+
+:root {
+  --lits-board: #ece4d3;
+  --lits-board-line: #d4cbb9;
+  --lits-ink: #26241f;
+  --lits-type-i: #2c6b8a;
+  --lits-type-l: #a9652b;
+  --lits-type-s: #66569b;
+  --lits-type-t: #a3485c;
+}
+
+.board-svg .lits-board-bg {
+  fill: var(--lits-board);
+  stroke: var(--lits-board-line);
+  stroke-width: 1.5;
+}
+
+.board-svg .lits-cell {
+  stroke: rgba(38, 36, 31, 0.08);
+  stroke-width: 1;
+  pointer-events: none;
+}
+
+.board-svg .lits-cell.filled.pending {
+  fill: #3b382f;
+  stroke: rgba(255, 255, 255, 0.12);
+}
+
+.board-svg .lits-cell.filled.t-i {
+  fill: var(--lits-type-i);
+}
+.board-svg .lits-cell.filled.t-l {
+  fill: var(--lits-type-l);
+}
+.board-svg .lits-cell.filled.t-s {
+  fill: var(--lits-type-s);
+}
+.board-svg .lits-cell.filled.t-t {
+  fill: var(--lits-type-t);
+}
+
+.board-svg .lits-cell.unassigned {
+  fill: #f0dcda;
+  stroke: rgba(194, 59, 46, 0.25);
+}
+
+.board-svg .lits-cell.given {
+  stroke-width: 1.6;
+}
+
+.board-svg .lits-sheen {
+  fill: rgba(255, 255, 255, 0.12);
+  pointer-events: none;
+}
+
+.board-svg .lits-cross {
+  stroke: rgba(38, 36, 31, 0.55);
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  pointer-events: none;
+}
+
+.board-svg .lits-given-dot {
+  fill: rgba(38, 36, 31, 0.55);
+  pointer-events: none;
+}
+
+.board-svg .lits-given-dot.on-fill {
+  fill: rgba(255, 253, 248, 0.9);
+}
+
+.board-svg .lits-bad {
+  fill: rgba(194, 59, 46, 0.14);
+  stroke: var(--error);
+  stroke-width: 2.4;
+  pointer-events: none;
+}
+
+.board-svg .lits-conflict {
+  fill: rgba(194, 59, 46, 0.1);
+  stroke: var(--error);
+  stroke-width: 2;
+  stroke-dasharray: 5 3;
+  pointer-events: none;
+}
+
+.board-svg .lits-region-line {
+  stroke: #7d7668;
+  stroke-width: 3;
+  stroke-linecap: round;
+  pointer-events: none;
+}
+
+.board-svg .lits-region-no {
+  fill: rgba(38, 36, 31, 0.32);
+  font-family: var(--font);
+  font-size: 9px;
+  font-weight: 600;
+  pointer-events: none;
+}
+
+.board-svg .lits-region-no.on-fill {
+  fill: rgba(255, 253, 248, 0.55);
+}
+
+.board-svg .lits-unassigned-mark {
+  fill: var(--error);
+  font-family: var(--font);
+  font-size: 18px;
+  font-weight: 700;
+  text-anchor: middle;
+  dominant-baseline: central;
+  pointer-events: none;
+}
+
+.board-svg .lits-count-badge rect {
+  fill: #fffdf8;
+  stroke: #b7ae9a;
+  stroke-width: 1;
+}
+
+.board-svg .lits-count-badge text {
+  fill: var(--ink-soft);
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 600;
+  text-anchor: middle;
+  dominant-baseline: central;
+  pointer-events: none;
+}
+
+.board-svg .lits-type-badge circle {
+  fill: #fffdf8;
+  stroke: var(--ink);
+  stroke-width: 2;
+}
+
+.board-svg .lits-type-badge text {
+  fill: var(--ink);
+  font-family: var(--font);
+  font-size: 12px;
+  font-weight: 700;
+  text-anchor: middle;
+  dominant-baseline: central;
+  pointer-events: none;
+}
+
+.board-svg .lits-type-badge.t-i circle {
+  stroke: var(--lits-type-i);
+}
+.board-svg .lits-type-badge.t-i text {
+  fill: var(--lits-type-i);
+}
+.board-svg .lits-type-badge.t-l circle {
+  stroke: var(--lits-type-l);
+}
+.board-svg .lits-type-badge.t-l text {
+  fill: var(--lits-type-l);
+}
+.board-svg .lits-type-badge.t-s circle {
+  stroke: var(--lits-type-s);
+}
+.board-svg .lits-type-badge.t-s text {
+  fill: var(--lits-type-s);
+}
+.board-svg .lits-type-badge.t-t circle {
+  stroke: var(--lits-type-t);
+}
+.board-svg .lits-type-badge.t-t text {
+  fill: var(--lits-type-t);
+}
+
+.board-svg .lits-type-badge.bad circle {
+  stroke: var(--error);
+}
+.board-svg .lits-type-badge.bad text {
+  fill: var(--error);
+}
+
+.board-svg .cell-hit {
+  pointer-events: all;
+}
+
+.board-svg .cell-hit:hover {
+  fill: rgba(31, 111, 92, 0.16);
+}

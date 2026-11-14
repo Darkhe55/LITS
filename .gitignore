@@ -1,0 +1,25 @@
+# dependencies
+node_modules/
+
+# build output
+dist/
+
+# dev / test artifacts
+output/
+
+# runtime data (saved puzzles, progress, last puzzle)
+data/
+
+# tool metadata
+.commandcode/
+
+# local env / OS files
+.env
+.env.*
+*.local
+.DS_Store
+Thumbs.db
+*.log
+
+# source puzzle image (kept local, not published)
+0ef60fe1-e750-4774-9a19-531e86b7746b.png
