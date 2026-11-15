@@ -104,6 +104,9 @@ export class CustomEditor {
   private gridEventsBound = false
   private colorEventsBound = false
   private stroke: 'paint' | 'erase' | null = null
+  /** 正在编辑的已保存题目；null = 新建 */
+  private editingId: string | null = null
+  private editingName: string | null = null
 
   constructor(adapter: GameAdapter, private host: CustomHost) {
     this.adapter = adapter
@@ -335,12 +338,63 @@ export class CustomEditor {
     this.bindColorControls()
     this.refreshColorUI()
     this.renderGrid()
-    this.host.message(`键盘：方向键移动 · ${this.adapter.custom.hint}`)
+    const editing = this.editingId ? `正在编辑「${this.editingName ?? this.editingId}」。` : ''
+    this.host.message(`${editing}键盘：方向键移动 · ${this.adapter.custom.hint}`)
     document.getElementById('custom-grid')?.focus()
   }
 
+  /** 把已保存的自定义题读回编辑器；保存时覆盖原 id */
+  edit(p: Puzzle): void {
+    const toGrid = this.adapter.custom.toGrid
+    if (!toGrid) {
+      this.host.message('本游戏不支持编辑自定义题。', 'bad')
+      return
+    }
+    const restored = toGrid(p)
+    if (!restored) {
+      this.host.message('无法还原这道题的题面。', 'bad')
+      return
+    }
+    const meta = this.adapter.meta
+    if (restored.width > meta.customMaxW || restored.height > meta.customMaxH) {
+      this.host.message(`题面超过最大尺寸 ${meta.customMaxW}×${meta.customMaxH}。`, 'bad')
+      return
+    }
+    this.w = restored.width
+    this.h = restored.height
+    this.grid = restored.grid.slice()
+    this.cursor = 0
+    this.editingId = p.id
+    this.editingName = p.name
+    const panel = document.getElementById('custom-editor')
+    if (panel) panel.hidden = false
+    const wEl = document.getElementById('custom-w') as HTMLInputElement | null
+    const hEl = document.getElementById('custom-h') as HTMLInputElement | null
+    if (wEl) wEl.value = String(this.w)
+    if (hEl) hEl.value = String(this.h)
+    this.renderPalette()
+    this.bindColorControls()
+    this.refreshColorUI()
+    this.renderGrid()
+    this.host.message(`正在编辑「${p.name}」。保存会覆盖原题。`, 'ok')
+    panel?.scrollIntoView({ block: 'nearest' })
+    document.getElementById('custom-grid')?.focus()
+  }
+
+  /** 删除题库条目时清掉编辑态 */
+  clearEditing(id?: string): void {
+    if (id && this.editingId !== id) return
+    this.editingId = null
+    this.editingName = null
+  }
+
   regen(): void {
-    this.grid = new Array<CustomCellColor>(this.w * this.h).fill(null)
+    this.editingId = null
+    this.editingName = null
+    const { w, h } = this.readSize()
+    this.w = w
+    this.h = h
+    this.grid = new Array<CustomCellColor>(w * h).fill(null)
     this.cursor = 0
     this.renderGrid()
     this.host.message(`已生成 ${this.w}×${this.h} 网格。${this.adapter.custom.hint}`)
@@ -421,9 +475,12 @@ export class CustomEditor {
       this.host.message('网格已重置，请先填好内容。', 'bad')
       return
     }
-    // 用「宽x高」做稳定 id，重复载入同尺寸只覆盖同一条（进度按 id 存）
-    const stableId = `${this.adapter.meta.customIdPrefix}${w}x${h}`
+    // 新建时用「宽x高」做稳定 id，重复载入同尺寸只覆盖同一条（进度按 id 存）
+    const stableId = this.editingId ?? `${this.adapter.meta.customIdPrefix}${w}x${h}`
     const puzzle = this.makePuzzle(stableId)
+    if (this.editingName) puzzle.name = this.editingName
+    this.editingId = puzzle.id
+    this.editingName = puzzle.name
     this.host.loadPuzzle(puzzle)
   }
 
@@ -433,12 +490,16 @@ export class CustomEditor {
       this.host.message('请先生成网格并填好内容。', 'bad')
       return
     }
+    const isEditing = !!this.editingId
     const stamp = new Date()
     const pad = (n: number) => String(n).padStart(2, '0')
-    const name = `自定义 · ${w}×${h} · ${pad(stamp.getMonth() + 1)}${pad(stamp.getDate())}${pad(stamp.getHours())}${pad(stamp.getMinutes())}`
-    const puzzle = { ...this.makePuzzle(), name }
+    const generated = `自定义 · ${w}×${h} · ${pad(stamp.getMonth() + 1)}${pad(stamp.getDate())}${pad(stamp.getHours())}${pad(stamp.getMinutes())}`
+    const puzzle = this.makePuzzle(this.editingId ?? undefined)
+    puzzle.name = this.editingName ?? generated
     this.host.savePuzzle(puzzle)
-    this.host.message(`已保存到题库：「${name}」，下次启动仍可选用。`, 'ok')
+    this.editingId = puzzle.id
+    this.editingName = puzzle.name
+    this.host.message(`已${isEditing ? '更新' : '保存'}到题库：「${puzzle.name}」。`, 'ok')
   }
 
   solve(): void {

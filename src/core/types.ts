@@ -128,6 +128,8 @@ export interface CustomSupport {
   encodePuzzle(p: Puzzle): Record<string, unknown>
   /** 从 library 条目还原题面；不合法返回 null */
   decodePuzzle(record: Record<string, unknown>): Puzzle | null
+  /** 把已有题目还原成编辑器网格（编辑已保存的自定义题用） */
+  toGrid?(p: Puzzle): { width: number; height: number; grid: CustomCellColor[] } | null
 }
 
 /**

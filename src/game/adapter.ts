@@ -15,6 +15,7 @@
 
 import { playDrop, playPluck } from '../core/audio'
 import type {
+  CustomCellColor,
   CustomSupport,
   GameAdapter,
   Move,
@@ -183,6 +184,25 @@ const custom: CustomSupport = {
       difficulty: 'custom',
       regions: splitDisconnected(w, h, regions),
     } satisfies LitsPuzzle
+  },
+
+  /**
+   * 把已保存的题面还原成编辑器网格：每个区域给一个唯一颜色。
+   * 颜色只用于在编辑器里区分区域，保存时会重新按连通性拆回区域。
+   */
+  toGrid: (p) => {
+    const lp = p as LitsPuzzle
+    const size = p.width * p.height
+    if (!lp.regions || lp.regions.length !== size) return null
+    const colorFor = (region: number): string => {
+      // 奇数乘数散列到 24bit：不同区域必然得到不同颜色，避免还原时被合并
+      const h = (Math.imul(region + 1, 2654435761) >>> 8) & 0xffffff
+      return `#${h.toString(16).padStart(6, '0')}`
+    }
+    const grid: CustomCellColor[] = lp.regions.map((region) =>
+      region < 0 ? null : colorFor(region),
+    )
+    return { width: p.width, height: p.height, grid }
   },
 }
 
