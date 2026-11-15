@@ -54,8 +54,8 @@ const meta = {
   customIdPrefix: 'lits-custom-',
   customMinW: 5,
   customMinH: 5,
-  customMaxW: 10,
-  customMaxH: 10,
+  customMaxW: 60,
+  customMaxH: 60,
 }
 
 /** 自定义题板的预设色板 */
