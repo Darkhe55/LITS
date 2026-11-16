@@ -80,21 +80,29 @@ src/
 ## 图片识别导入
 
 ```bash
-# 只识别、求解、预览，不写入
+# 正方形题图：只识别、求解、预览
 npm run import-image -- 题面.png --size 15
 
+# 非正方形题图：分别指定宽高（可只给一边，另一边自动识别）
+npm run import-image -- 题面.png --width 20 --height 12
+
+# 只识别网格与区域（不求解、不写入）
+npm run import-image -- 题面.png --dry
+
 # 识别并追加到题库
-npm run import-image -- 题面.png --size 15 --name "我的 LITS" --append
+npm run import-image -- 题面.png --width 20 --height 12 --name "我的 LITS" --append
 ```
 
 | 参数 | 说明 |
 |------|------|
-| `--size N` | 网格边长；不填则自动识别 |
+| `--size N` | 正方形网格边长；不填则自动识别 |
+| `--width N` / `--height N` | 非正方形题图的宽/高；可只给一个，另一个自动识别；与 `--size` 互斥（优先 width/height） |
 | `--name 名称` | 题库中显示的名称 |
 | `--append` | 写入 `src/game/imported-puzzles.ts` |
 | `--no-verify` | 跳过唯一解计数，只求一个解 |
 | `--merge-small` | 把 2–3 格小区域并入相邻区域 |
 | `--thick N` | 手动指定粗线阈值（像素） |
+| `--dry` | 只做网格/区域识别并打印，不求解、不写入 |
 
 识别流程：投影找网格线 → 边界中点测量暗线厚度 → 四连通洪泛得到区域 → 生成 LITS 候选 → 求解并校验唯一解。
 

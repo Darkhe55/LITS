@@ -2,7 +2,9 @@
  * 从 LITS 题面图片识别区域并导入题库。
  *
  * 用法：
- *   node scripts/import-image.mjs <图片路径> [--size 15] [--name 名称] [--append] [--no-verify]
+ *   node scripts/import-image.mjs <图片路径> [--size 15 | --width 15 --height 10] [--name 名称] [--append] [--no-verify]
+ *
+ * --size 表示正方形；非正方形题图用 --width/--height（也可只给一个，另一个自动识别）。
  *
  * 识别原理：
  *   1. 用 Playwright 打开图片到 canvas，取像素；
@@ -41,17 +43,20 @@ function has(name) {
 const imagePath = process.argv[2]
 if (!imagePath || imagePath.startsWith('--')) {
   console.error(
-    '用法：node scripts/import-image.mjs <图片路径> [--size 15] [--name 名称] [--append] [--no-verify]',
+    '用法：node scripts/import-image.mjs <图片路径> [--size 15 | --width 15 --height 10] [--name 名称] [--append] [--no-verify]',
   )
   process.exit(1)
 }
 
 const sizeOpt = Number(arg('--size', '0')) || 0
+const widthOpt = Number(arg('--width', '0')) || 0
+const heightOpt = Number(arg('--height', '0')) || 0
 const thickOpt = Number(arg('--thick', '0')) || 0
 const name = arg('--name', path.basename(imagePath, path.extname(imagePath)))
 const append = has('--append')
 const verify = !has('--no-verify')
 const mergeSmall = has('--merge-small')
+const dry = has('--dry')
 
 const dataUrl = `data:image/png;base64,${readFileSync(imagePath).toString('base64')}`
 
@@ -60,7 +65,7 @@ const page = await browser.newPage()
 await page.setContent('<canvas id="c"></canvas>')
 
 const analyzed = await page.evaluate(
-  async ({ dataUrl, sizeOpt, thickOpt }) => {
+  async ({ dataUrl, sizeOpt, widthOpt, heightOpt, thickOpt }) => {
     const img = new Image()
     img.src = dataUrl
     await img.decode()
@@ -116,20 +121,27 @@ const analyzed = await page.evaluate(
     }
     const xs = clusters(colCount, H * 0.45)
     const ys = clusters(rowCount, W * 0.45)
-    const n = sizeOpt || Math.min(xs.length, ys.length) - 1
-    if (!(n >= 2)) throw new Error(`无法确定网格尺寸：竖线 ${xs.length} 条，横线 ${ys.length} 条`)
-    if (xs.length !== n + 1 || ys.length !== n + 1) {
+    const autoW = xs.length - 1
+    const autoH = ys.length - 1
+    const w = widthOpt || sizeOpt || autoW
+    const h = heightOpt || sizeOpt || autoH
+    if (!(w >= 2) || !(h >= 2)) {
       throw new Error(
-        `网格不匹配：识别到 ${xs.length} 条竖线和 ${ys.length} 条横线，但尺寸参数是 ${n}`,
+        `无法确定网格尺寸：竖线 ${xs.length} 条、横线 ${ys.length} 条（自动识别 ${autoW}×${autoH}）`,
+      )
+    }
+    if (xs.length !== w + 1 || ys.length !== h + 1) {
+      throw new Error(
+        `网格不匹配：识别到 ${xs.length} 条竖线和 ${ys.length} 条横线，但目标是 ${w}×${h}`,
       )
     }
 
     const x0 = xs[0]
-    const x1 = xs[n]
+    const x1 = xs[w]
     const y0 = ys[0]
-    const y1 = ys[n]
-    const cellX = (x1 - x0) / n
-    const cellY = (y1 - y0) / n
+    const y1 = ys[h]
+    const cellX = (x1 - x0) / w
+    const cellY = (y1 - y0) / h
 
     const runX = (cx, cy, radius) => {
       let best = 0
@@ -157,8 +169,8 @@ const analyzed = await page.evaluate(
     // 先采样所有内部边界的暗线厚度，再用 1D k-means 自动区分细网格与粗区域边界
     const vRuns = []
     const hRuns = []
-    for (let i = 1; i < n; i++) {
-      for (let j = 0; j < n; j++) {
+    for (let i = 1; i < w; i++) {
+      for (let j = 0; j < h; j++) {
         const cx = x0 + i * cellX
         const cy = y0 + (j + 0.5) * cellY
         const t = Math.max(
@@ -169,8 +181,8 @@ const analyzed = await page.evaluate(
         vRuns.push([i, j, t])
       }
     }
-    for (let j = 1; j < n; j++) {
-      for (let i = 0; i < n; i++) {
+    for (let j = 1; j < h; j++) {
+      for (let i = 0; i < w; i++) {
         const cx = x0 + (i + 0.5) * cellX
         const cy = y0 + j * cellY
         const t = Math.max(
@@ -203,8 +215,8 @@ const analyzed = await page.evaluate(
       if (n2) c2 = s2 / n2
     }
     const thick = thickOpt > 0 ? thickOpt : Math.max(3, Math.min(cellX, cellY) * 0.04, (c1 + c2) / 2)
-    const vWall = Array.from({ length: n }, () => new Uint8Array(n))
-    const hWall = Array.from({ length: n }, () => new Uint8Array(n))
+    const vWall = Array.from({ length: w }, () => new Uint8Array(h))
+    const hWall = Array.from({ length: h }, () => new Uint8Array(w))
     let vCount = 0
     let hCount = 0
     for (const [i, j, t] of vRuns) {
@@ -220,17 +232,17 @@ const analyzed = await page.evaluate(
       }
     }
 
-    const regions = new Array(n * n).fill(-1)
+    const regions = new Array(w * h).fill(-1)
     let next = 0
-    for (let start = 0; start < n * n; start++) {
+    for (let start = 0; start < w * h; start++) {
       if (regions[start] !== -1) continue
       const id = next++
       regions[start] = id
       const stack = [start]
       while (stack.length) {
         const i = stack.pop()
-        const x = i % n
-        const y = (i / n) | 0
+        const x = i % w
+        const y = (i / w) | 0
         const push = (j) => {
           if (j >= 0 && regions[j] === -1) {
             regions[j] = id
@@ -238,16 +250,17 @@ const analyzed = await page.evaluate(
           }
         }
         if (x > 0 && !vWall[x][y]) push(i - 1)
-        if (x + 1 < n && !vWall[x + 1][y]) push(i + 1)
-        if (y > 0 && !hWall[y][x]) push(i - n)
-        if (y + 1 < n && !hWall[y + 1][x]) push(i + n)
+        if (x + 1 < w && !vWall[x + 1][y]) push(i + 1)
+        if (y > 0 && !hWall[y][x]) push(i - w)
+        if (y + 1 < h && !hWall[y + 1][x]) push(i + w)
       }
     }
 
     const sizes = new Array(next).fill(0)
     for (const r of regions) sizes[r]++
     return {
-      n,
+      w,
+      h,
       regions,
       regionCount: next,
       minSize: Math.min(...sizes),
@@ -257,12 +270,12 @@ const analyzed = await page.evaluate(
       thick: Number(thick.toFixed(2)),
     }
   },
-  { dataUrl, sizeOpt, thickOpt },
+  { dataUrl, sizeOpt, widthOpt, heightOpt, thickOpt },
 )
 
 await browser.close()
 
-let { n, regions, regionCount, minSize, maxSize, thick } = analyzed
+let { w, h, regions, regionCount, minSize, maxSize, thick } = analyzed
 let workingRegions = regions
 let merged = 0
 
@@ -281,15 +294,15 @@ if (mergeSmall && minSize < 4) {
     }
     if (small < 0) break
     const shared = new Map()
-    for (let i = 0; i < n * n; i++) {
+    for (let i = 0; i < w * h; i++) {
       if (workingRegions[i] !== small) continue
-      const x = i % n
-      const y = (i / n) | 0
+      const x = i % w
+      const y = (i / w) | 0
       for (const j of [
         x > 0 ? i - 1 : -1,
-        x + 1 < n ? i + 1 : -1,
-        y > 0 ? i - n : -1,
-        y + 1 < n ? i + n : -1,
+        x + 1 < w ? i + 1 : -1,
+        y > 0 ? i - w : -1,
+        y + 1 < h ? i + w : -1,
       ]) {
         if (j < 0) continue
         const r = workingRegions[j]
@@ -306,13 +319,13 @@ if (mergeSmall && minSize < 4) {
         target = r
       }
     }
-    for (let i = 0; i < n * n; i++) if (workingRegions[i] === small) workingRegions[i] = target
+    for (let i = 0; i < w * h; i++) if (workingRegions[i] === small) workingRegions[i] = target
     sizes.set(target, (sizes.get(target) ?? 0) + smallSize)
     sizes.delete(small)
     merged++
   }
   const remap = new Map()
-  for (let i = 0; i < n * n; i++) {
+  for (let i = 0; i < w * h; i++) {
     const r = workingRegions[i]
     if (!remap.has(r)) remap.set(r, remap.size)
     workingRegions[i] = remap.get(r)
@@ -327,7 +340,7 @@ if (mergeSmall && minSize < 4) {
   // 合并后仍可能有区域（例如 2×2）放不下 L/I/S/T：继续并入共享边最长的邻区
   const renumber = () => {
     const map = new Map()
-    for (let i = 0; i < n * n; i++) {
+    for (let i = 0; i < w * h; i++) {
       const r = workingRegions[i]
       if (!map.has(r)) map.set(r, map.size)
       workingRegions[i] = map.get(r)
@@ -335,15 +348,15 @@ if (mergeSmall && minSize < 4) {
   }
   const mergeOne = (small) => {
     const shared = new Map()
-    for (let i = 0; i < n * n; i++) {
+    for (let i = 0; i < w * h; i++) {
       if (workingRegions[i] !== small) continue
-      const x = i % n
-      const y = (i / n) | 0
+      const x = i % w
+      const y = (i / w) | 0
       for (const j of [
         x > 0 ? i - 1 : -1,
-        x + 1 < n ? i + 1 : -1,
-        y > 0 ? i - n : -1,
-        y + 1 < n ? i + n : -1,
+        x + 1 < w ? i + 1 : -1,
+        y > 0 ? i - w : -1,
+        y + 1 < h ? i + w : -1,
       ]) {
         if (j < 0) continue
         const r = workingRegions[j]
@@ -360,7 +373,7 @@ if (mergeSmall && minSize < 4) {
       }
     }
     if (target < 0) return false
-    for (let i = 0; i < n * n; i++) if (workingRegions[i] === small) workingRegions[i] = target
+    for (let i = 0; i < w * h; i++) if (workingRegions[i] === small) workingRegions[i] = target
     return true
   }
 
@@ -368,11 +381,11 @@ if (mergeSmall && minSize < 4) {
     renumber()
     let ctx2
     try {
-      ctx2 = makeContext(workingRegions, n, n)
+      ctx2 = makeContext(workingRegions, w, h)
     } catch {
       break
     }
-    const d2 = buildDomains(ctx2, new Array(n * n).fill(EMPTY))
+    const d2 = buildDomains(ctx2, new Array(w * h).fill(EMPTY))
     let bad = -1
     for (let r = 0; r < ctx2.regionCount; r++) {
       if (d2[r].length === 0) {
@@ -403,18 +416,23 @@ if (analyzed.minSize < 4) {
 }
 
 console.log(
-  `[import] ${path.basename(imagePath)}：${n}×${n}，区域 ${regionCount} 个（${minSize}–${maxSize} 格），粗线阈值 ${thick}px`,
+  `[import] ${path.basename(imagePath)}：${w}×${h}，区域 ${regionCount} 个（${minSize}–${maxSize} 格），粗线阈值 ${thick}px`,
 )
+
+if (dry) {
+  console.log('[import] --dry：仅识别，不求解、不写入。')
+  process.exit(0)
+}
 
 let ctx
 try {
-  ctx = makeContext(workingRegions, n, n)
+  ctx = makeContext(workingRegions, w, h)
 } catch (err) {
   console.error('[import] 区域数据非法：', err)
   process.exit(1)
 }
 
-const domains = buildDomains(ctx, new Array(n * n).fill(EMPTY))
+const domains = buildDomains(ctx, new Array(w * h).fill(EMPTY))
 if (domains.some((list) => list.length === 0)) {
   console.error('[import] 有区域无法放下 L/I/S/T，区域识别可能不准确')
   process.exit(1)
@@ -435,7 +453,7 @@ if (verify) {
     console.error(`[import] 解不唯一：${counted.count} 个，可能是边线漏识别/多识别`)
     process.exit(1)
   }
-  const plan = planFromState(ctx, new Array(n * n).fill(EMPTY), 2_000_000, 20_000)
+  const plan = planFromState(ctx, new Array(w * h).fill(EMPTY), 2_000_000, 20_000)
   if (!plan.ok || !plan.solution) {
     console.error('[import] 唯一解存在，但求解器没有求出解')
     process.exit(1)
@@ -443,7 +461,7 @@ if (verify) {
   solution = plan.solution
   saturated = plan.saturated
 } else {
-  const plan = planFromState(ctx, new Array(n * n).fill(EMPTY), 2_000_000, 20_000)
+  const plan = planFromState(ctx, new Array(w * h).fill(EMPTY), 2_000_000, 20_000)
   if (!plan.ok || !plan.solution) {
     console.error('[import] 求解失败')
     process.exit(1)
@@ -461,10 +479,10 @@ const id = arg('--id', `lits-import-${Date.now().toString(36)}`)
 
 if (!append) {
   console.log('[import] 预览模式（未写入）。区域矩阵：')
-  for (let y = 0; y < n; y++) {
+  for (let y = 0; y < h; y++) {
     console.log(
       workingRegions
-        .slice(y * n, y * n + n)
+        .slice(y * w, y * w + w)
         .map((r) => String(r).padStart(2, '0'))
         .join(' '),
     )
@@ -472,7 +490,7 @@ if (!append) {
   console.log('[import] 加 --append 可写入题库。')
 } else {
   const file = path.resolve('src/game/imported-puzzles.ts')
-  const entry = `  { id: ${JSON.stringify(id)}, name: ${JSON.stringify(name)}, width: ${n}, height: ${n}, difficulty: 'hard', series: "导入", board: ${JSON.stringify(board)}, solution: ${JSON.stringify(solutionBits)} },\n`
+  const entry = `  { id: ${JSON.stringify(id)}, name: ${JSON.stringify(name)}, width: ${w}, height: ${h}, difficulty: 'hard', series: "导入", board: ${JSON.stringify(board)}, solution: ${JSON.stringify(solutionBits)} },\n`
   if (!existsSync(file)) {
     writeFileSync(
       file,
