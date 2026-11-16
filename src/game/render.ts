@@ -80,6 +80,35 @@ export function renderBoard(
     `<rect class="lits-board-bg" x="${m.pad - 12}" y="${m.pad - 12}" width="${w * m.cell + 24}" height="${h * m.cell + 24}" rx="${m.cell * 0.22}" />`,
   )
 
+  const regionAt = (x: number, y: number): number =>
+    x < 0 || y < 0 || x >= w || y >= h ? -2 : p.regions[y * w + x]!
+
+  /** 铺满整格的路径；只在“凸出的外侧角”做圆角，内部共享边保持直角无缝 */
+  const roundedCellPath = (i: number, x0: number, y0: number, size: number): string => {
+    const region = regionAt(i % w, Math.floor(i / w))
+    const r = Math.min(radius, size / 2)
+    const boundary = (dx: number, dy: number): boolean =>
+      regionAt((i % w) + dx, Math.floor(i / w) + dy) !== region
+    const sameDiag = (dx: number, dy: number): boolean =>
+      regionAt((i % w) + dx, Math.floor(i / w) + dy) === region
+    const tl = boundary(-1, 0) && boundary(0, -1) && !sameDiag(-1, -1)
+    const tr = boundary(1, 0) && boundary(0, -1) && !sameDiag(1, -1)
+    const br = boundary(1, 0) && boundary(0, 1) && !sameDiag(1, 1)
+    const bl = boundary(-1, 0) && boundary(0, 1) && !sameDiag(-1, 1)
+    const x1 = x0 + size
+    const y1 = y0 + size
+    let d = `M ${(x0 + (tl ? r : 0)).toFixed(2)} ${y0.toFixed(2)}`
+    d += ` L ${(x1 - (tr ? r : 0)).toFixed(2)} ${y0.toFixed(2)}`
+    if (tr) d += ` Q ${x1.toFixed(2)} ${y0.toFixed(2)} ${x1.toFixed(2)} ${(y0 + r).toFixed(2)}`
+    d += ` L ${x1.toFixed(2)} ${(y1 - (br ? r : 0)).toFixed(2)}`
+    if (br) d += ` Q ${x1.toFixed(2)} ${y1.toFixed(2)} ${(x1 - r).toFixed(2)} ${y1.toFixed(2)}`
+    d += ` L ${(x0 + (bl ? r : 0)).toFixed(2)} ${y1.toFixed(2)}`
+    if (bl) d += ` Q ${x0.toFixed(2)} ${y1.toFixed(2)} ${x0.toFixed(2)} ${(y1 - r).toFixed(2)}`
+    d += ` L ${x0.toFixed(2)} ${(y0 + (tl ? r : 0)).toFixed(2)}`
+    if (tl) d += ` Q ${x0.toFixed(2)} ${y0.toFixed(2)} ${(x0 + r).toFixed(2)} ${y0.toFixed(2)}`
+    return d + ' Z'
+  }
+
   // —— 单元格 ——
   for (let i = 0; i < w * h; i++) {
     const region = p.regions[i] ?? -1
@@ -110,11 +139,11 @@ export function renderBoard(
     if (conflict.has(i)) cls += ' conflict'
     if (block.has(i)) cls += ' block'
 
-    let content = `<rect class="${cls}" x="${x.toFixed(2)}" y="${y.toFixed(2)}" width="${inner.toFixed(2)}" height="${inner.toFixed(2)}"${unassigned ? ` rx="${radius.toFixed(2)}"` : ''}${fillAttr} />`
+    let content = unassigned
+      ? `<rect class="${cls}" x="${x.toFixed(2)}" y="${y.toFixed(2)}" width="${inner.toFixed(2)}" height="${inner.toFixed(2)}" rx="${radius.toFixed(2)}"${fillAttr} />`
+      : `<path class="${cls}" d="${roundedCellPath(i, x, y, inner)}"${fillAttr} />`
 
-    if (filled) {
-      content += `<rect class="lits-sheen" x="${(x + 2).toFixed(2)}" y="${(y + 2).toFixed(2)}" width="${(inner - 4).toFixed(2)}" height="${(inner * 0.34).toFixed(2)}" rx="${(radius * 0.7).toFixed(2)}" />`
-    } else if (s.cells[i] === CROSS) {
+    if (s.cells[i] === CROSS) {
       const pad = inner * 0.28
       content += `<line class="lits-cross" x1="${(x + pad).toFixed(2)}" y1="${(y + pad).toFixed(2)}" x2="${(x + inner - pad).toFixed(2)}" y2="${(y + inner - pad).toFixed(2)}" />`
       content += `<line class="lits-cross" x1="${(x + inner - pad).toFixed(2)}" y1="${(y + pad).toFixed(2)}" x2="${(x + pad).toFixed(2)}" y2="${(y + inner - pad).toFixed(2)}" />`
