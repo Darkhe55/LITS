@@ -83,14 +83,26 @@ export function renderBoard(
   const regionAt = (x: number, y: number): number =>
     x < 0 || y < 0 || x >= w || y >= h ? -2 : p.regions[y * w + x]!
 
-  /** 铺满整格的路径；只在“凸出的外侧角”做圆角，内部共享边保持直角无缝 */
-  const roundedCellPath = (i: number, x0: number, y0: number, x1: number, y1: number): string => {
+  /** 铺满整格；只有实心/涂色骨牌的外侧凸角做圆角，区域背景与内部共享边保持直角 */
+  const roundedCellPath = (
+    i: number,
+    x0: number,
+    y0: number,
+    x1: number,
+    y1: number,
+    round: boolean,
+  ): string => {
     const region = regionAt(i % w, Math.floor(i / w))
     const r = Math.min(radius, (x1 - x0) / 2, (y1 - y0) / 2)
-    const boundary = (dx: number, dy: number): boolean =>
-      regionAt((i % w) + dx, Math.floor(i / w) + dy) !== region
-    const sameDiag = (dx: number, dy: number): boolean =>
-      regionAt((i % w) + dx, Math.floor(i / w) + dy) === region
+    const pieceAt = (dx: number, dy: number): boolean => {
+      const x = (i % w) + dx
+      const y = Math.floor(i / w) + dy
+      if (x < 0 || y < 0 || x >= w || y >= h) return false
+      const j = y * w + x
+      return s.cells[j] === FILLED && p.regions[j] === region
+    }
+    const boundary = (dx: number, dy: number): boolean => round && !pieceAt(dx, dy)
+    const sameDiag = (dx: number, dy: number): boolean => round && pieceAt(dx, dy)
     const tl = boundary(-1, 0) && boundary(0, -1) && !sameDiag(-1, -1)
     const tr = boundary(1, 0) && boundary(0, -1) && !sameDiag(1, -1)
     const br = boundary(1, 0) && boundary(0, 1) && !sameDiag(1, 1)
@@ -147,7 +159,7 @@ export function renderBoard(
 
     let content = unassigned
       ? `<rect class="${cls}" x="${x.toFixed(2)}" y="${y.toFixed(2)}" width="${inner.toFixed(2)}" height="${inner.toFixed(2)}" rx="${radius.toFixed(2)}"${fillAttr} />`
-      : `<path class="${cls}" d="${roundedCellPath(i, fx0, fy0, fx1, fy1)}"${fillAttr} />`
+      : `<path class="${cls}" d="${roundedCellPath(i, fx0, fy0, fx1, fy1, filled)}"${fillAttr} />`
 
     if (s.cells[i] === CROSS) {
       const pad = inner * 0.28
@@ -214,13 +226,6 @@ export function renderBoard(
   }
 
   const pointKey = (p: Point): string => `${p[0].toFixed(2)},${p[1].toFixed(2)}`
-  const dist = (a: Point, b: Point): number => Math.hypot(a[0] - b[0], a[1] - b[1])
-  const trim = (from: Point, to: Point, length: number): Point => {
-    const d = dist(from, to)
-    if (d <= 0) return from
-    const t = Math.min(0.5, length / d)
-    return [from[0] + (to[0] - from[0]) * t, from[1] + (to[1] - from[1]) * t]
-  }
   const regionLineParts: string[] = []
   for (const edges of boundaries.values()) {
     const byPoint = new Map<string, number[]>()
@@ -256,51 +261,9 @@ export function renderBoard(
       }
       if (points.length < 4) continue
 
-      let area = 0
-      for (let k = 0; k < points.length; k++) {
-        const a = points[k]!
-        const b = points[(k + 1) % points.length]!
-        area += a[0] * b[1] - b[0] * a[1]
-      }
-      const orientation = area >= 0 ? 1 : -1
-      let d = ''
-      for (let k = 0; k < points.length; k++) {
-        const prev = points[(k - 1 + points.length) % points.length]!
-        const cur = points[k]!
-        const next = points[(k + 1) % points.length]!
-        const cross =
-          (cur[0] - prev[0]) * (next[1] - cur[1]) -
-          (cur[1] - prev[1]) * (next[0] - cur[0])
-        const convex = cross * orientation > 0
-        const r = convex
-          ? Math.min(radius, dist(prev, cur) / 2, dist(cur, next) / 2)
-          : 0
-        const inPoint = convex ? trim(cur, prev, r) : cur
-        const outPoint = convex ? trim(cur, next, r) : cur
-        if (k === 0) {
-          d = `M ${outPoint[0].toFixed(2)} ${outPoint[1].toFixed(2)}`
-        } else {
-          d += ` L ${inPoint[0].toFixed(2)} ${inPoint[1].toFixed(2)}`
-          if (convex) {
-            d += ` Q ${cur[0].toFixed(2)} ${cur[1].toFixed(2)} ${outPoint[0].toFixed(2)} ${outPoint[1].toFixed(2)}`
-          }
-        }
-      }
-      const firstPrev = points[points.length - 1]!
-      const firstCur = points[0]!
-      const firstNext = points[1]!
-      const firstCross =
-        (firstCur[0] - firstPrev[0]) * (firstNext[1] - firstCur[1]) -
-        (firstCur[1] - firstPrev[1]) * (firstNext[0] - firstCur[0])
-      const firstConvex = firstCross * orientation > 0
-      const firstR = firstConvex
-        ? Math.min(radius, dist(firstPrev, firstCur) / 2, dist(firstCur, firstNext) / 2)
-        : 0
-      const firstIn = firstConvex ? trim(firstCur, firstPrev, firstR) : firstCur
-      const firstOut = firstConvex ? trim(firstCur, firstNext, firstR) : firstCur
-      d += ` L ${firstIn[0].toFixed(2)} ${firstIn[1].toFixed(2)}`
-      if (firstConvex) {
-        d += ` Q ${firstCur[0].toFixed(2)} ${firstCur[1].toFixed(2)} ${firstOut[0].toFixed(2)} ${firstOut[1].toFixed(2)}`
+      let d = `M ${points[0]![0].toFixed(2)} ${points[0]![1].toFixed(2)}`
+      for (let k = 1; k < points.length; k++) {
+        d += ` L ${points[k]![0].toFixed(2)} ${points[k]![1].toFixed(2)}`
       }
       regionLineParts.push(`<path class="lits-region-line" fill="none" d="${d} Z" />`)
     }
