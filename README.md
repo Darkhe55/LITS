@@ -122,6 +122,6 @@ npm start         # 开发服务 + 自动打开浏览器
 npm run build     # tsc --noEmit + vite build
 npm run gen       # 重新生成题库
 npm run check     # 审计题库
-npm run verify    # 参考解、逻辑回放与交互验证
-npm run audit     # 逐题审计逻辑解题
+npm run verify    # 自动启动服务，验证参考解、逻辑回放与交互
+npm run audit     # 自动启动服务，逐题审计逻辑解题
 ```
