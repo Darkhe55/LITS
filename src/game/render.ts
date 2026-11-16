@@ -68,7 +68,7 @@ export function renderBoard(
   const isCustomPuzzle = p.difficulty === 'custom'
   const isOutside = (i: number): boolean => p.regions[i]! < 0 && !isCustomPuzzle
   const baseInner = m.cell
-  const radius = m.cell * 0.13
+  const radius = m.cell * 0.22
   const bad = new Set<number>(r.badCells ?? [])
   const conflict = new Set<number>(r.conflictCells ?? [])
   const block = new Set<number>(r.blockCells ?? [])
@@ -173,15 +173,25 @@ export function renderBoard(
   }
 
   // —— 区域粗边界 ——
-  const seenEdges = new Set<string>()
-  const lineParts: string[] = []
-  const addLine = (x1: number, y1: number, x2: number, y2: number): void => {
-    const key = `${x1.toFixed(1)},${y1.toFixed(1)},${x2.toFixed(1)},${y2.toFixed(1)}`
-    if (seenEdges.has(key)) return
-    seenEdges.add(key)
-    lineParts.push(
-      `<line class="lits-region-line" x1="${x1.toFixed(2)}" y1="${y1.toFixed(2)}" x2="${x2.toFixed(2)}" y2="${y2.toFixed(2)}" />`,
-    )
+  // 按区域边界描边，凸角使用与填充相同的圆角半径，避免小区域看起来是方框。
+  type Point = [number, number]
+  interface Edge {
+    a: Point
+    b: Point
+  }
+  const boundaries = new Map<number, Edge[]>()
+  const edgeKeys = new Set<string>()
+  const addEdge = (region: number, a: Point, b: Point): void => {
+    const key = `${region}:${a[0].toFixed(1)},${a[1].toFixed(1)}:${b[0].toFixed(1)},${b[1].toFixed(1)}`
+    const reverse = `${region}:${b[0].toFixed(1)},${b[1].toFixed(1)}:${a[0].toFixed(1)},${a[1].toFixed(1)}`
+    if (edgeKeys.has(key) || edgeKeys.has(reverse)) return
+    edgeKeys.add(key)
+    let list = boundaries.get(region)
+    if (!list) {
+      list = []
+      boundaries.set(region, list)
+    }
+    list.push({ a, b })
   }
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
@@ -194,13 +204,108 @@ export function renderBoard(
       const up = y > 0 ? (p.regions[i - w] ?? -1) : null
       const right = x + 1 < w ? (p.regions[i + 1] ?? -1) : null
       const down = y + 1 < h ? (p.regions[i + w] ?? -1) : null
-      if (left === null || left !== region) addLine(x0, y0, x0, y0 + m.cell)
-      if (up === null || up !== region) addLine(x0, y0, x0 + m.cell, y0)
-      if (right === null || right !== region) addLine(x0 + m.cell, y0, x0 + m.cell, y0 + m.cell)
-      if (down === null || down !== region) addLine(x0, y0 + m.cell, x0 + m.cell, y0 + m.cell)
+      if (left === null || left !== region) addEdge(region, [x0, y0], [x0, y0 + m.cell])
+      if (up === null || up !== region) addEdge(region, [x0, y0], [x0 + m.cell, y0])
+      if (right === null || right !== region)
+        addEdge(region, [x0 + m.cell, y0], [x0 + m.cell, y0 + m.cell])
+      if (down === null || down !== region)
+        addEdge(region, [x0, y0 + m.cell], [x0 + m.cell, y0 + m.cell])
     }
   }
-  parts.push(`<g class="lits-region-lines">${lineParts.join('')}</g>`)
+
+  const pointKey = (p: Point): string => `${p[0].toFixed(2)},${p[1].toFixed(2)}`
+  const dist = (a: Point, b: Point): number => Math.hypot(a[0] - b[0], a[1] - b[1])
+  const trim = (from: Point, to: Point, length: number): Point => {
+    const d = dist(from, to)
+    if (d <= 0) return from
+    const t = Math.min(0.5, length / d)
+    return [from[0] + (to[0] - from[0]) * t, from[1] + (to[1] - from[1]) * t]
+  }
+  const regionLineParts: string[] = []
+  for (const edges of boundaries.values()) {
+    const byPoint = new Map<string, number[]>()
+    edges.forEach((edge, index) => {
+      for (const p of [edge.a, edge.b]) {
+        const key = pointKey(p)
+        const list = byPoint.get(key)
+        if (list) list.push(index)
+        else byPoint.set(key, [index])
+      }
+    })
+    const used = new Set<number>()
+    for (let startIndex = 0; startIndex < edges.length; startIndex++) {
+      if (used.has(startIndex)) continue
+      const first = edges[startIndex]!
+      const start = first.a
+      const points: Point[] = [start]
+      let current = first.b
+      used.add(startIndex)
+      while (true) {
+        points.push(current)
+        if (pointKey(current) === pointKey(start)) break
+        const candidates = byPoint.get(pointKey(current)) ?? []
+        const next = candidates.find((idx) => !used.has(idx))
+        if (next === undefined) break
+        used.add(next)
+        const edge = edges[next]!
+        current = pointKey(edge.a) === pointKey(current) ? edge.b : edge.a
+        if (points.length > edges.length + 2) break
+      }
+      if (points.length > 1 && pointKey(points[points.length - 1]!) === pointKey(points[0]!)) {
+        points.pop()
+      }
+      if (points.length < 4) continue
+
+      let area = 0
+      for (let k = 0; k < points.length; k++) {
+        const a = points[k]!
+        const b = points[(k + 1) % points.length]!
+        area += a[0] * b[1] - b[0] * a[1]
+      }
+      const orientation = area >= 0 ? 1 : -1
+      let d = ''
+      for (let k = 0; k < points.length; k++) {
+        const prev = points[(k - 1 + points.length) % points.length]!
+        const cur = points[k]!
+        const next = points[(k + 1) % points.length]!
+        const cross =
+          (cur[0] - prev[0]) * (next[1] - cur[1]) -
+          (cur[1] - prev[1]) * (next[0] - cur[0])
+        const convex = cross * orientation > 0
+        const r = convex
+          ? Math.min(radius, dist(prev, cur) / 2, dist(cur, next) / 2)
+          : 0
+        const inPoint = convex ? trim(cur, prev, r) : cur
+        const outPoint = convex ? trim(cur, next, r) : cur
+        if (k === 0) {
+          d = `M ${outPoint[0].toFixed(2)} ${outPoint[1].toFixed(2)}`
+        } else {
+          d += ` L ${inPoint[0].toFixed(2)} ${inPoint[1].toFixed(2)}`
+          if (convex) {
+            d += ` Q ${cur[0].toFixed(2)} ${cur[1].toFixed(2)} ${outPoint[0].toFixed(2)} ${outPoint[1].toFixed(2)}`
+          }
+        }
+      }
+      const firstPrev = points[points.length - 1]!
+      const firstCur = points[0]!
+      const firstNext = points[1]!
+      const firstCross =
+        (firstCur[0] - firstPrev[0]) * (firstNext[1] - firstCur[1]) -
+        (firstCur[1] - firstPrev[1]) * (firstNext[0] - firstCur[0])
+      const firstConvex = firstCross * orientation > 0
+      const firstR = firstConvex
+        ? Math.min(radius, dist(firstPrev, firstCur) / 2, dist(firstCur, firstNext) / 2)
+        : 0
+      const firstIn = firstConvex ? trim(firstCur, firstPrev, firstR) : firstCur
+      const firstOut = firstConvex ? trim(firstCur, firstNext, firstR) : firstCur
+      d += ` L ${firstIn[0].toFixed(2)} ${firstIn[1].toFixed(2)}`
+      if (firstConvex) {
+        d += ` Q ${firstCur[0].toFixed(2)} ${firstCur[1].toFixed(2)} ${firstOut[0].toFixed(2)} ${firstOut[1].toFixed(2)}`
+      }
+      regionLineParts.push(`<path class="lits-region-line" fill="none" d="${d} Z" />`)
+    }
+  }
+  parts.push(`<g class="lits-region-lines">${regionLineParts.join('')}</g>`)
 
   // —— 区域编号（每个区域左上角） ——
   const regionAnchors = new Map<number, number>()

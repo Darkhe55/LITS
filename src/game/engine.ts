@@ -1075,17 +1075,43 @@ export function planFromState(
 const BASE62 = '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ'
 
 export function encodeRegions(regions: number[]): string {
+  let maxRegion = -1
+  for (const r of regions) if (r > maxRegion) maxRegion = r
+  // 超过单字符 base62 容量时，每格改用两个 base62 字符，最多 62² = 3844 个区域。
+  const wide = maxRegion >= BASE62.length
   let out = ''
   for (const r of regions) {
-    if (r < 0 || r >= BASE62.length) out += '.'
-    else out += BASE62[r]!
+    if (r < 0) {
+      out += wide ? '..' : '.'
+    } else if (wide) {
+      out += BASE62[Math.floor(r / BASE62.length)]! + BASE62[r % BASE62.length]!
+    } else {
+      out += BASE62[r]!
+    }
   }
   return out
 }
 
 export function decodeRegions(text: string, expected: number): number[] | null {
-  if (typeof text !== 'string' || text.length !== expected) return null
+  if (typeof text !== 'string') return null
+  const wide = text.length === expected * 2 && text.length !== expected
+  if (text.length !== expected && !wide) return null
   const out: number[] = []
+  if (wide) {
+    for (let i = 0; i < expected; i++) {
+      const a = text[i * 2]!
+      const b = text[i * 2 + 1]!
+      if (a === '.' || a === '?' || a === '-' || b === '.' || b === '?' || b === '-') {
+        out.push(-1)
+        continue
+      }
+      const va = BASE62.indexOf(a)
+      const vb = BASE62.indexOf(b)
+      if (va < 0 || vb < 0) return null
+      out.push(va * BASE62.length + vb)
+    }
+    return out
+  }
   for (let i = 0; i < expected; i++) {
     const ch = text[i]!
     if (ch === '.' || ch === '?' || ch === '-') {

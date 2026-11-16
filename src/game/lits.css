@@ -91,6 +91,8 @@
   stroke: #7d7668;
   stroke-width: 3;
   stroke-linecap: round;
+  stroke-linejoin: round;
+  fill: none;
   pointer-events: none;
 }
 

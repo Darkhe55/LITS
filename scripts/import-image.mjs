@@ -2,7 +2,7 @@
  * 从 LITS 题面图片识别区域并导入题库。
  *
  * 用法：
- *   node scripts/import-image.mjs <图片路径> [--size 15 | --width 15 --height 10] [--name 名称] [--append] [--no-verify]
+ *   node scripts/import-image.mjs <图片路径> [--size 15 | --width 15 --height 10] [--name 名称] [--append] [--verify]
  *
  * --size 表示正方形；非正方形题图用 --width/--height（也可只给一个，另一个自动识别）。
  *
@@ -43,7 +43,7 @@ function has(name) {
 const imagePath = process.argv[2]
 if (!imagePath || imagePath.startsWith('--')) {
   console.error(
-    '用法：node scripts/import-image.mjs <图片路径> [--size 15 | --width 15 --height 10] [--name 名称] [--append] [--no-verify]',
+    '用法：node scripts/import-image.mjs <图片路径> [--size 15 | --width 15 --height 10] [--name 名称] [--append] [--verify]',
   )
   process.exit(1)
 }
@@ -54,7 +54,7 @@ const heightOpt = Number(arg('--height', '0')) || 0
 const thickOpt = Number(arg('--thick', '0')) || 0
 const name = arg('--name', path.basename(imagePath, path.extname(imagePath)))
 const append = has('--append')
-const verify = !has('--no-verify')
+const verify = has('--verify')
 const mergeSmall = has('--merge-small')
 const dry = has('--dry')
 
@@ -422,7 +422,7 @@ if (mergeSmall && minSize < 4) {
     return true
   }
 
-  for (let repair = 0; repair < 80; repair++) {
+  for (let repair = 0; repair < 1600; repair++) {
     renumber()
     let ctx2
     try {
@@ -452,8 +452,8 @@ if (mergeSmall && minSize < 4) {
   maxSize = analyzed.maxSize
 }
 
-if (regionCount >= 62) {
-  console.error(`识别到 ${regionCount} 个区域，超过当前 base62 编码上限 61`)
+if (regionCount > 1200) {
+  console.error(`识别到 ${regionCount} 个区域，超过当前 1200 区域编码上限`)
   process.exit(1)
 }
 if (analyzed.minSize < 4) {
@@ -465,12 +465,11 @@ console.log(
 )
 
 const activeCount = analyzed.activeCount ?? w * h
-const suspicious =
-  maxSize > 64 || (regionCount > 1 && maxSize > activeCount * 0.5) || activeCount > 625
+const suspicious = maxSize > 64 || (regionCount > 1 && maxSize > activeCount * 0.5)
 if (suspicious) {
   console.warn(
-    `[import] 区域识别异常或题板过大（有效格 ${activeCount}，最大区域 ${maxSize} 格）。` +
-      '先用 --dry --thick 2/3/4 检查；当前 base62 区域编码上限 61，50×50 这类超大题暂时放不下。',
+    `[import] 区域识别异常（有效格 ${activeCount}，最大区域 ${maxSize} 格）。` +
+      '先用 --dry --thick 2/3/4 检查；如果最大区域接近整个题板，说明粗线阈值不对。',
   )
   if (!dry) process.exit(1)
 }
