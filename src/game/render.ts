@@ -67,8 +67,7 @@ export function renderBoard(
   const h = puzzle.height
   const isCustomPuzzle = p.difficulty === 'custom'
   const isOutside = (i: number): boolean => p.regions[i]! < 0 && !isCustomPuzzle
-  const gap = 2
-  const inner = m.cell - gap
+  const baseInner = m.cell
   const radius = m.cell * 0.13
   const bad = new Set<number>(r.badCells ?? [])
   const conflict = new Set<number>(r.conflictCells ?? [])
@@ -83,10 +82,15 @@ export function renderBoard(
 
   // —— 单元格 ——
   for (let i = 0; i < w * h; i++) {
-    const x = m.pad + (i % w) * m.cell + gap / 2
-    const y = m.pad + Math.floor(i / w) * m.cell + gap / 2
     const region = p.regions[i] ?? -1
     if (isOutside(i)) continue
+    // 同一区域的相邻格无缝拼接：格子铺满整个 cell，不再留 gap/圆角；
+    // 只有自定义题板里“尚未划分”的格子保留内缩样式。
+    const unassigned = region < 0
+    const inset = unassigned ? 1 : 0
+    const inner = baseInner - inset * 2
+    const x = m.pad + (i % w) * m.cell + inset
+    const y = m.pad + Math.floor(i / w) * m.cell + inset
     const info = region >= 0 ? infoById.get(region) : undefined
     const filled = s.cells[i] === FILLED
     const completeType = info?.complete ? info.type : null
@@ -106,7 +110,7 @@ export function renderBoard(
     if (conflict.has(i)) cls += ' conflict'
     if (block.has(i)) cls += ' block'
 
-    let content = `<rect class="${cls}" x="${x.toFixed(2)}" y="${y.toFixed(2)}" width="${inner.toFixed(2)}" height="${inner.toFixed(2)}" rx="${radius.toFixed(2)}"${fillAttr} />`
+    let content = `<rect class="${cls}" x="${x.toFixed(2)}" y="${y.toFixed(2)}" width="${inner.toFixed(2)}" height="${inner.toFixed(2)}"${unassigned ? ` rx="${radius.toFixed(2)}"` : ''}${fillAttr} />`
 
     if (filled) {
       content += `<rect class="lits-sheen" x="${(x + 2).toFixed(2)}" y="${(y + 2).toFixed(2)}" width="${(inner - 4).toFixed(2)}" height="${(inner * 0.34).toFixed(2)}" rx="${(radius * 0.7).toFixed(2)}" />`
