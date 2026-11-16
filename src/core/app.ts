@@ -423,9 +423,18 @@ export function createApp(root: HTMLElement, adapter: GameAdapter) {
       { passive: false },
     )
 
+    svg.addEventListener('mousedown', (e) => {
+      // 阻止鼠标中键触发浏览器自动滚动
+      if (e.button === 1) e.preventDefault()
+    })
+
+    svg.addEventListener('auxclick', (e) => {
+      if (e.button === 1) e.preventDefault()
+    })
+
     svg.addEventListener('pointerdown', (e) => {
       resumeAudio()
-      if (e.button !== 0 && e.button !== 2) return
+      if (e.button !== 0 && e.button !== 1 && e.button !== 2) return
 
       lastClient = { x: e.clientX, y: e.clientY }
       dragging = true
@@ -433,6 +442,13 @@ export function createApp(root: HTMLElement, adapter: GameAdapter) {
       painted = new Set()
       stroke = null
       pendingIndex = -1
+
+      // 鼠标中键：只拖动画布，不在格子上落子
+      if (e.button === 1) {
+        e.preventDefault()
+        svg.setPointerCapture(e.pointerId)
+        return
+      }
 
       const hit = hitAt(e)
       if (!hit) {
