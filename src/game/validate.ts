@@ -78,8 +78,11 @@ function validateUnassigned(
 
 export function validate(state: GameState, puzzle: Puzzle): LitsResult {
   const p = asLitsPuzzle(puzzle)
+  // 只有自定义题板把 -1 当作「尚未划分区域」；导入的异形题板中 -1 是外部/空洞格。
   let unassigned = 0
-  for (const r of p.regions) if (r < 0) unassigned++
+  if (p.difficulty === 'custom') {
+    for (const r of p.regions) if (r < 0) unassigned++
+  }
   if (unassigned > 0) return validateUnassigned(puzzle, state, unassigned)
 
   const s = asLitsState(state)

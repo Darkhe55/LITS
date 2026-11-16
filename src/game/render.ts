@@ -65,6 +65,8 @@ export function renderBoard(
   const r = result as LitsResult
   const w = puzzle.width
   const h = puzzle.height
+  const isCustomPuzzle = p.difficulty === 'custom'
+  const isOutside = (i: number): boolean => p.regions[i]! < 0 && !isCustomPuzzle
   const gap = 2
   const inner = m.cell - gap
   const radius = m.cell * 0.13
@@ -84,6 +86,7 @@ export function renderBoard(
     const x = m.pad + (i % w) * m.cell + gap / 2
     const y = m.pad + Math.floor(i / w) * m.cell + gap / 2
     const region = p.regions[i] ?? -1
+    if (isOutside(i)) continue
     const info = region >= 0 ? infoById.get(region) : undefined
     const filled = s.cells[i] === FILLED
     const completeType = info?.complete ? info.type : null
@@ -144,6 +147,7 @@ export function renderBoard(
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
       const i = y * w + x
+      if (isOutside(i)) continue
       const region = p.regions[i] ?? -1
       const x0 = m.pad + x * m.cell
       const y0 = m.pad + y * m.cell
@@ -225,6 +229,7 @@ export function renderBoard(
 
   // —— 命中层 ——
   for (let i = 0; i < w * h; i++) {
+    if (isOutside(i)) continue
     const x = m.pad + (i % w) * m.cell
     const y = m.pad + Math.floor(i / w) * m.cell
     parts.push(
@@ -244,5 +249,8 @@ export function hitTest(
   const col = Math.floor((x - m.pad) / m.cell)
   const row = Math.floor((y - m.pad) / m.cell)
   if (col < 0 || row < 0 || col >= puzzle.width || row >= puzzle.height) return null
-  return { index: row * puzzle.width + col }
+  const index = row * puzzle.width + col
+  const p = asLitsPuzzle(puzzle)
+  if (p.regions[index]! < 0 && p.difficulty !== 'custom') return null
+  return { index }
 }

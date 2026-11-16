@@ -21,6 +21,10 @@ export function createEmptyState(puzzle: Puzzle): LitsState {
   if (p.regions.length !== size) throw new Error('题面区域数据长度不匹配')
   const givens = new Array<number>(size).fill(EMPTY)
   for (let i = 0; i < size; i++) {
+    if (p.regions[i]! < 0) {
+      givens[i] = CROSS
+      continue
+    }
     const v = p.givens?.[i] ?? EMPTY
     givens[i] = v === FILLED ? FILLED : EMPTY
   }
@@ -47,14 +51,14 @@ export function cloneState(state: GameState): LitsState {
 export function cycleValue(state: GameState, target: HitTarget): number {
   const s = asLitsState(state)
   const given = s.givens[target.index] ?? EMPTY
-  if (given === FILLED) return FILLED
+  if (given === FILLED || given === CROSS) return given
   return s.cells[target.index] === EMPTY ? FILLED : EMPTY
 }
 
 export function rightClickValue(state: GameState, target: HitTarget): number {
   const s = asLitsState(state)
   const given = s.givens[target.index] ?? EMPTY
-  if (given === FILLED) return FILLED
+  if (given === FILLED || given === CROSS) return given
   const current = s.cells[target.index] ?? EMPTY
   return current === EMPTY ? CROSS : EMPTY
 }
@@ -62,7 +66,7 @@ export function rightClickValue(state: GameState, target: HitTarget): number {
 export function applyMove(state: GameState, move: Move): void {
   const s = asLitsState(state)
   if (move.index < 0 || move.index >= s.cells.length) return
-  if ((s.givens[move.index] ?? EMPTY) === FILLED) return
+  if ((s.givens[move.index] ?? EMPTY) !== EMPTY) return
   s.cells[move.index] =
     move.to === FILLED || move.to === CROSS ? move.to : EMPTY
 }
@@ -115,7 +119,7 @@ export function deserializeState(data: Record<string, unknown>): LitsState | nul
   const givens = readBits(data.givens, size) ?? new Array<number>(size).fill(EMPTY)
 
   for (let i = 0; i < size; i++) {
-    if (givens[i] === FILLED) cells[i] = FILLED
+    if (givens[i] !== EMPTY) cells[i] = givens[i]!
   }
 
   return { puzzleId: data.puzzleId, width: w, height: h, cells, givens }

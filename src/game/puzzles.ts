@@ -45,10 +45,6 @@ for (const raw of [...RAW_PUZZLES, ...IMPORTED_PUZZLES]) {
     console.warn(`[LITS] 区域解码失败：${raw.id}`)
     continue
   }
-  if (decoded.some((r) => r < 0)) {
-    console.warn(`[LITS] 区域未划分完：${raw.id}`)
-    continue
-  }
   const regions = normalizeRegions(decoded)
   try {
     makeContext(regions, raw.width, raw.height)
@@ -94,12 +90,17 @@ export function getReferenceSolution(id: string): LitsState | null {
   if (!puzzle) return null
   const size = puzzle.width * puzzle.height
   const givens = new Array<number>(size).fill(EMPTY)
-  for (let i = 0; i < size; i++) givens[i] = puzzle.givens?.[i] === FILLED ? FILLED : EMPTY
+  for (let i = 0; i < size; i++) {
+    if (puzzle.regions[i]! < 0) givens[i] = 2
+    else if (puzzle.givens?.[i] === FILLED) givens[i] = FILLED
+  }
+  const ref = cells.slice()
+  for (let i = 0; i < size; i++) if (puzzle.regions[i]! < 0) ref[i] = 2
   return {
     puzzleId: puzzle.id,
     width: puzzle.width,
     height: puzzle.height,
-    cells: cells.slice(),
+    cells: ref,
     givens,
   }
 }

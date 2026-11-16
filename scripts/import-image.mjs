@@ -215,27 +215,69 @@ const analyzed = await page.evaluate(
       if (n2) c2 = s2 / n2
     }
     const thick = thickOpt > 0 ? thickOpt : Math.max(3, Math.min(cellX, cellY) * 0.04, (c1 + c2) / 2)
+    // 判断哪些格子属于题板：至少有一条「细线」边。外部坐标/文字没有网格线；
+    // 内部空洞四周只有粗边界、没有细网格线，会被判为外部。
+    const edgeTX = (ex, ey) => {
+      if (ex < 0 || ey < 0 || ex > w || ey >= h) return 0
+      const cx = x0 + ex * cellX
+      const cy = y0 + (ey + 0.5) * cellY
+      return Math.max(
+        runX(cx, cy - cellY * 0.22, cellX * 0.28),
+        runX(cx, cy, cellX * 0.28),
+        runX(cx, cy + cellY * 0.22, cellX * 0.28),
+      )
+    }
+    const edgeTY = (ex, ey) => {
+      if (ey < 0 || ex < 0 || ey > h || ex >= w) return 0
+      const cx = x0 + (ex + 0.5) * cellX
+      const cy = y0 + ey * cellY
+      return Math.max(
+        runY(cx - cellX * 0.22, cy, cellY * 0.28),
+        runY(cx, cy, cellY * 0.28),
+        runY(cx + cellX * 0.22, cy, cellY * 0.28),
+      )
+    }
+    const isThin = (v) => v > 0 && v < thick
+    const isThick = (v) => v >= thick
+    const active = new Uint8Array(w * h)
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const edges = [edgeTX(x, y), edgeTX(x + 1, y), edgeTY(x, y), edgeTY(x, y + 1)]
+        const thinCount = edges.filter(isThin).length
+        const thickCount = edges.filter(isThick).length
+        // 题板格通常有两条以上细网格边；缺角/空洞边缘只有一条借来的细线，
+        // 再要求至少两条粗边（外轮廓）才排除掉这类“外圈”格。
+        active[y * w + x] = thinCount >= 2 || (thinCount >= 1 && thickCount >= 2) ? 1 : 0
+      }
+    }
+
     const vWall = Array.from({ length: w }, () => new Uint8Array(h))
     const hWall = Array.from({ length: h }, () => new Uint8Array(w))
     let vCount = 0
     let hCount = 0
-    for (const [i, j, t] of vRuns) {
-      if (t >= thick) {
-        vWall[i][j] = 1
-        vCount++
+    for (let y = 0; y < h; y++) {
+      for (let x = 1; x < w; x++) {
+        if (!active[y * w + x] || !active[y * w + x - 1]) continue
+        if (edgeTX(x, y) >= thick) {
+          vWall[x][y] = 1
+          vCount++
+        }
       }
     }
-    for (const [i, j, t] of hRuns) {
-      if (t >= thick) {
-        hWall[j][i] = 1
-        hCount++
+    for (let y = 1; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        if (!active[y * w + x] || !active[(y - 1) * w + x]) continue
+        if (edgeTY(x, y) >= thick) {
+          hWall[y][x] = 1
+          hCount++
+        }
       }
     }
 
     const regions = new Array(w * h).fill(-1)
     let next = 0
     for (let start = 0; start < w * h; start++) {
-      if (regions[start] !== -1) continue
+      if (!active[start] || regions[start] !== -1) continue
       const id = next++
       regions[start] = id
       const stack = [start]
@@ -244,7 +286,7 @@ const analyzed = await page.evaluate(
         const x = i % w
         const y = (i / w) | 0
         const push = (j) => {
-          if (j >= 0 && regions[j] === -1) {
+          if (j >= 0 && j < w * h && active[j] && regions[j] === -1) {
             regions[j] = id
             stack.push(j)
           }
@@ -257,14 +299,15 @@ const analyzed = await page.evaluate(
     }
 
     const sizes = new Array(next).fill(0)
-    for (const r of regions) sizes[r]++
+    for (const r of regions) if (r >= 0) sizes[r]++
     return {
       w,
       h,
       regions,
       regionCount: next,
-      minSize: Math.min(...sizes),
-      maxSize: Math.max(...sizes),
+      activeCount: active.reduce((a, b) => a + b, 0),
+      minSize: sizes.length ? Math.min(...sizes) : 0,
+      maxSize: sizes.length ? Math.max(...sizes) : 0,
       vWalls: vCount,
       hWalls: hCount,
       thick: Number(thick.toFixed(2)),
@@ -281,7 +324,7 @@ let merged = 0
 
 if (mergeSmall && minSize < 4) {
   const sizes = new Map()
-  for (const r of workingRegions) sizes.set(r, (sizes.get(r) ?? 0) + 1)
+  for (const r of workingRegions) if (r >= 0) sizes.set(r, (sizes.get(r) ?? 0) + 1)
   let guard = 0
   while (guard++ < 100) {
     let small = -1
@@ -306,7 +349,7 @@ if (mergeSmall && minSize < 4) {
       ]) {
         if (j < 0) continue
         const r = workingRegions[j]
-        if (r === small) continue
+        if (r < 0 || r === small) continue
         shared.set(r, (shared.get(r) ?? 0) + 1)
       }
     }
@@ -327,12 +370,13 @@ if (mergeSmall && minSize < 4) {
   const remap = new Map()
   for (let i = 0; i < w * h; i++) {
     const r = workingRegions[i]
+    if (r < 0) continue
     if (!remap.has(r)) remap.set(r, remap.size)
     workingRegions[i] = remap.get(r)
   }
   analyzed.regionCount = remap.size
   const finalCounts = new Map()
-  for (const r of workingRegions) finalCounts.set(r, (finalCounts.get(r) ?? 0) + 1)
+  for (const r of workingRegions) if (r >= 0) finalCounts.set(r, (finalCounts.get(r) ?? 0) + 1)
   analyzed.minSize = Math.min(...finalCounts.values())
   analyzed.maxSize = Math.max(...finalCounts.values())
   console.log(`[import] 已将 ${merged} 个过小区域并入相邻区域，合并后 ${analyzed.regionCount} 个区域，最小 ${analyzed.minSize} 格`)
@@ -342,6 +386,7 @@ if (mergeSmall && minSize < 4) {
     const map = new Map()
     for (let i = 0; i < w * h; i++) {
       const r = workingRegions[i]
+      if (r < 0) continue
       if (!map.has(r)) map.set(r, map.size)
       workingRegions[i] = map.get(r)
     }
@@ -360,7 +405,7 @@ if (mergeSmall && minSize < 4) {
       ]) {
         if (j < 0) continue
         const r = workingRegions[j]
-        if (r === small) continue
+        if (r < 0 || r === small) continue
         shared.set(r, (shared.get(r) ?? 0) + 1)
       }
     }
@@ -398,7 +443,7 @@ if (mergeSmall && minSize < 4) {
   }
   renumber()
   const repairCounts = new Map()
-  for (const r of workingRegions) repairCounts.set(r, (repairCounts.get(r) ?? 0) + 1)
+  for (const r of workingRegions) if (r >= 0) repairCounts.set(r, (repairCounts.get(r) ?? 0) + 1)
   analyzed.regionCount = repairCounts.size
   analyzed.minSize = Math.min(...repairCounts.values())
   analyzed.maxSize = Math.max(...repairCounts.values())
@@ -416,7 +461,7 @@ if (analyzed.minSize < 4) {
 }
 
 console.log(
-  `[import] ${path.basename(imagePath)}：${w}×${h}，区域 ${regionCount} 个（${minSize}–${maxSize} 格），粗线阈值 ${thick}px`,
+  `[import] ${path.basename(imagePath)}：${w}×${h}，有效格 ${analyzed.activeCount ?? w * h}，区域 ${regionCount} 个（${minSize}–${maxSize} 格），粗线阈值 ${thick}px`,
 )
 
 if (dry) {

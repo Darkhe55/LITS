@@ -21,11 +21,13 @@ export const CROSS = 2
 export type PieceType = 'I' | 'L' | 'S' | 'T'
 export const PIECE_TYPES: PieceType[] = ['I', 'L', 'S', 'T']
 
-/** 题面：regions 每格一个区域号；givens 为预填格（0/1） */
+/** 题面：regions 每格一个区域号；-1 = 外部/空洞格（不参与游戏）；givens 为预填格（0/1） */
 export interface LitsPuzzle extends Puzzle {
   regions: number[]
   givens?: number[]
   solution?: number[]
+  /** 1 = 该格在题板之外（异形题板的空洞/外部）；可选，缺省由 regions<0 推断 */
+  outside?: number[]
 }
 
 /** 棋盘状态 */
@@ -74,6 +76,8 @@ export interface LitsContext {
   h: number
   n: number
   regions: number[]
+  /** 1 = 外部/空洞格 */
+  outside: Uint8Array
   regionCount: number
   regionCells: number[][]
   neighborPairs: Array<[number, number]>
@@ -241,18 +245,25 @@ export function enumerateCandidates(regionCells: number[], w: number): Candidate
 export function makeContext(regions: number[], w: number, h: number): LitsContext {
   const n = w * h
   if (regions.length !== n) throw new Error(`regions 长度 ${regions.length} != ${n}`)
+  const outside = new Uint8Array(n)
   let regionCount = 0
-  for (const r of regions) {
-    if (!Number.isInteger(r) || r < 0) throw new Error('regions 含未划分格')
+  for (let i = 0; i < n; i++) {
+    const r = regions[i]!
+    if (!Number.isInteger(r)) throw new Error('regions 含非法值')
+    if (r === -1) {
+      outside[i] = 1
+      continue
+    }
+    if (r < -1) throw new Error('regions 含未划分格')
     if (r + 1 > regionCount) regionCount = r + 1
   }
   const regionCells: number[][] = Array.from({ length: regionCount }, () => [])
-  for (let i = 0; i < n; i++) regionCells[regions[i]!]!.push(i)
+  for (let i = 0; i < n; i++) if (regions[i]! >= 0) regionCells[regions[i]!]!.push(i)
 
   const pairs = new Set<string>()
   const neighborPairs: Array<[number, number]> = []
   const addPair = (a: number, b: number): void => {
-    if (a === b) return
+    if (a < 0 || b < 0 || a === b) return
     const lo = Math.min(a, b)
     const hi = Math.max(a, b)
     const key = `${lo},${hi}`
@@ -263,6 +274,7 @@ export function makeContext(regions: number[], w: number, h: number): LitsContex
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
       const i = y * w + x
+      if (outside[i]) continue
       if (x + 1 < w) addPair(regions[i]!, regions[i + 1]!)
       if (y + 1 < h) addPair(regions[i]!, regions[i + w]!)
     }
@@ -272,11 +284,13 @@ export function makeContext(regions: number[], w: number, h: number): LitsContex
   for (let y = 0; y + 1 < h; y++) {
     for (let x = 0; x + 1 < w; x++) {
       const a = y * w + x
-      windows.push([a, a + 1, a + w, a + w + 1])
+      const quad = [a, a + 1, a + w, a + w + 1]
+      if (quad.some((i) => outside[i])) continue
+      windows.push(quad)
     }
   }
 
-  return { w, h, n, regions, regionCount, regionCells, neighborPairs, windows }
+  return { w, h, n, regions, outside, regionCount, regionCells, neighborPairs, windows }
 }
 
 /* ────────────────────────── 候选域 ────────────────────────── */
@@ -347,6 +361,7 @@ export function propagateDomains(
 
     const forcedFilled = new Uint8Array(n)
     const forcedEmpty = new Uint8Array(n)
+    for (let i = 0; i < n; i++) if (ctx.outside[i]) forcedEmpty[i] = 1
     for (let r = 0; r < regionCount; r++) {
       const list = domains[r]!
       const count = new Int32Array(n)
@@ -500,7 +515,7 @@ export function propagateDomains(
 /* ────────────────────────── 求解 / 计数 ────────────────────────── */
 
 function solutionFromDomains(ctx: LitsContext, domains: Candidate[][]): number[] | null {
-  const cells = new Array<number>(ctx.n).fill(EMPTY)
+  const cells = new Array<number>(ctx.n).fill(CROSS)
   for (let r = 0; r < ctx.regionCount; r++) {
     if (domains[r]!.length !== 1) return null
     for (const i of domains[r]![0]!.cells) cells[i] = FILLED
@@ -842,7 +857,11 @@ export function validatePartial(
   }
 
   let unassigned = 0
-  for (let i = 0; i < n; i++) if (regions[i]! < 0) unassigned++
+  let outsideCount = 0
+  for (let i = 0; i < n; i++) {
+    if (ctx.outside[i]) outsideCount++
+    else if (regions[i]! < 0) unassigned++
+  }
 
   const complete = regionsDone === regionCount
   const solved =
@@ -856,7 +875,7 @@ export function validatePartial(
   return {
     solved,
     filled,
-    empty: n - filled,
+    empty: n - outsideCount - filled,
     regionsTotal: regionCount,
     regionsDone,
     overfilled,

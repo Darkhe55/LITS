@@ -14,6 +14,7 @@ import {
   decodeBits,
   decodeRegions,
   EMPTY,
+  FILLED,
   makeContext,
   planFromState,
   validateSolution,
