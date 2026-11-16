@@ -84,9 +84,9 @@ export function renderBoard(
     x < 0 || y < 0 || x >= w || y >= h ? -2 : p.regions[y * w + x]!
 
   /** 铺满整格的路径；只在“凸出的外侧角”做圆角，内部共享边保持直角无缝 */
-  const roundedCellPath = (i: number, x0: number, y0: number, size: number): string => {
+  const roundedCellPath = (i: number, x0: number, y0: number, x1: number, y1: number): string => {
     const region = regionAt(i % w, Math.floor(i / w))
-    const r = Math.min(radius, size / 2)
+    const r = Math.min(radius, (x1 - x0) / 2, (y1 - y0) / 2)
     const boundary = (dx: number, dy: number): boolean =>
       regionAt((i % w) + dx, Math.floor(i / w) + dy) !== region
     const sameDiag = (dx: number, dy: number): boolean =>
@@ -95,8 +95,6 @@ export function renderBoard(
     const tr = boundary(1, 0) && boundary(0, -1) && !sameDiag(1, -1)
     const br = boundary(1, 0) && boundary(0, 1) && !sameDiag(1, 1)
     const bl = boundary(-1, 0) && boundary(0, 1) && !sameDiag(-1, 1)
-    const x1 = x0 + size
-    const y1 = y0 + size
     let d = `M ${(x0 + (tl ? r : 0)).toFixed(2)} ${y0.toFixed(2)}`
     d += ` L ${(x1 - (tr ? r : 0)).toFixed(2)} ${y0.toFixed(2)}`
     if (tr) d += ` Q ${x1.toFixed(2)} ${y0.toFixed(2)} ${x1.toFixed(2)} ${(y0 + r).toFixed(2)}`
@@ -120,6 +118,14 @@ export function renderBoard(
     const inner = baseInner - inset * 2
     const x = m.pad + (i % w) * m.cell + inset
     const y = m.pad + Math.floor(i / w) * m.cell + inset
+    // 不同区域之间保留一条可见边距；同区域共享边不缩进，保持连续。
+    const gapHalf = 1.5
+    const col = i % w
+    const row = Math.floor(i / w)
+    const fx0 = x + (regionAt(col - 1, row) !== region ? gapHalf : 0)
+    const fy0 = y + (regionAt(col, row - 1) !== region ? gapHalf : 0)
+    const fx1 = x + inner - (regionAt(col + 1, row) !== region ? gapHalf : 0)
+    const fy1 = y + inner - (regionAt(col, row + 1) !== region ? gapHalf : 0)
     const info = region >= 0 ? infoById.get(region) : undefined
     const filled = s.cells[i] === FILLED
     const completeType = info?.complete ? info.type : null
@@ -141,7 +147,7 @@ export function renderBoard(
 
     let content = unassigned
       ? `<rect class="${cls}" x="${x.toFixed(2)}" y="${y.toFixed(2)}" width="${inner.toFixed(2)}" height="${inner.toFixed(2)}" rx="${radius.toFixed(2)}"${fillAttr} />`
-      : `<path class="${cls}" d="${roundedCellPath(i, x, y, inner)}"${fillAttr} />`
+      : `<path class="${cls}" d="${roundedCellPath(i, fx0, fy0, fx1, fy1)}"${fillAttr} />`
 
     if (s.cells[i] === CROSS) {
       const pad = inner * 0.28
