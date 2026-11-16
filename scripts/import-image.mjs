@@ -214,7 +214,7 @@ const analyzed = await page.evaluate(
       if (n1) c1 = s1 / n1
       if (n2) c2 = s2 / n2
     }
-    const thick = thickOpt > 0 ? thickOpt : Math.max(3, Math.min(cellX, cellY) * 0.04, (c1 + c2) / 2)
+    const thick = thickOpt > 0 ? thickOpt : Math.max(1.5, Math.min(cellX, cellY) * 0.03, (c1 + c2) / 2)
     // 判断哪些格子属于题板：至少有一条「细线」边。外部坐标/文字没有网格线；
     // 内部空洞四周只有粗边界、没有细网格线，会被判为外部。
     const edgeTX = (ex, ey) => {
@@ -463,6 +463,17 @@ if (analyzed.minSize < 4) {
 console.log(
   `[import] ${path.basename(imagePath)}：${w}×${h}，有效格 ${analyzed.activeCount ?? w * h}，区域 ${regionCount} 个（${minSize}–${maxSize} 格），粗线阈值 ${thick}px`,
 )
+
+const activeCount = analyzed.activeCount ?? w * h
+const suspicious =
+  maxSize > 64 || (regionCount > 1 && maxSize > activeCount * 0.5) || activeCount > 625
+if (suspicious) {
+  console.warn(
+    `[import] 区域识别异常或题板过大（有效格 ${activeCount}，最大区域 ${maxSize} 格）。` +
+      '先用 --dry --thick 2/3/4 检查；当前 base62 区域编码上限 61，50×50 这类超大题暂时放不下。',
+  )
+  if (!dry) process.exit(1)
+}
 
 if (dry) {
   console.log('[import] --dry：仅识别，不求解、不写入。')
