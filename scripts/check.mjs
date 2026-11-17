@@ -43,6 +43,7 @@ while ((m = re.exec(text)) !== null) {
 
 let errors = 0
 let warnings = 0
+let totalProbes = 0
 const ids = new Set()
 
 for (const e of entries) {
@@ -157,13 +158,59 @@ for (const e of entries) {
     warnings++
   }
 
+  totalProbes += plan.probes
   console.log(
-    `[check] ${e.id} ${e.width}×${e.height} 区域 ${maxRegion + 1} · 解唯一 · 逻辑${plan.saturated ? '可推满' : '需回溯'} · ${counted.nodes} 节点`,
+    `[check] ${e.id} ${e.width}×${e.height} 区域 ${maxRegion + 1} · 解唯一 · 逻辑${plan.saturated ? '可推满' : '需回溯'}` +
+      ` · 反证 ${plan.probes} · 计数节点 ${counted.nodes}`,
   )
 }
 
 console.log(`[check] 共 ${entries.length} 题，错误 ${errors}，警告 ${warnings}`)
+if (entries.length) {
+  console.log(`[check] 推理量：反证合计 ${totalProbes}`)
+}
 if (entries.length === 0) {
   console.warn('[check] 题库为空，请先运行 npm run gen。')
 }
+// ── 导入题（imported-puzzles.ts）也做一次逻辑审计（不做唯一解计数，50×50 太重） ──
+try {
+  const { IMPORTED_PUZZLES } = await import('../src/game/imported-puzzles.ts')
+  for (const e of IMPORTED_PUZZLES) {
+    const size = e.width * e.height
+    const regions = decodeRegions(e.board, size)
+    const givens = e.givens ? decodeBits(e.givens, size) : new Array(size).fill(EMPTY)
+    if (!regions || !givens) {
+      console.error(`[check] 导入题 ${e.id} 编码非法`)
+      errors++
+      continue
+    }
+    let ctx
+    try {
+      ctx = makeContext(regions, e.width, e.height)
+    } catch {
+      console.error(`[check] 导入题 ${e.id} 区域非法`)
+      errors++
+      continue
+    }
+    const t0 = performance.now()
+    const plan = planFromState(ctx, givens, 200_000, 6000)
+    const ms = Math.round(performance.now() - t0)
+    if (!plan.ok || !plan.solution || !validateSolution(ctx, plan.solution).ok) {
+      console.error(`[check] 导入题 ${e.id} 逻辑求解失败`)
+      errors++
+      continue
+    }
+    if (!plan.saturated) {
+      console.warn(`[check] 导入题 ${e.id} 需要回溯（逻辑推演未饱和）`)
+      warnings++
+    }
+    console.log(
+      `[check] 导入题 ${e.id} ${e.width}×${e.height} 区域 ${ctx.regionCount}` +
+        ` · 反证 ${plan.probes} · 搜索节点 ${plan.searchNodes} · ${ms}ms`,
+    )
+  }
+} catch (err) {
+  console.warn(`[check] 导入题审计跳过：${err && err.message ? err.message : err}`)
+}
+
 if (errors > 0) process.exitCode = 1

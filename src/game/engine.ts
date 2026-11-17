@@ -1,12 +1,22 @@
 /**
  * LITS 四格骨墙 —— 规则引擎（纯函数，无 DOM 依赖）
  *
- * 规则：
+ * 游戏规则：
  *   1. 棋盘被划分成若干区域，每个区域恰好放一块 4 格骨牌；
  *   2. 骨牌必须是 L / I / S / T 之一（旋转、翻转视为同型）；
  *   3. 任意 2×2 区域不能四格全实心（等价于排除 O 型）；
  *   4. 同型骨牌不能上下左右直接接触（斜角允许）；
  *   5. 所有骨牌必须连成一片。
+ *
+ * 传播用的安全定式（只删候选/标叉，且全部可证明）：
+ *   R2  2×2 已有 3 格必实心 → 第 4 格标叉；
+ *   R3  相邻区域的同型候选互斥（候选域弧一致）；
+ *   R4  全局连通性：已确定实心格所在的「可能实心」连通块以外的格子标叉；
+ *   R5  候选域收缩：所有候选都含 / 都不含的格子确定实心 / 标叉；
+ *   R6  候选级 2×2：某个候选与已确定实心格凑出完整 2×2 → 该候选不合法；
+ *   R7  候选级连通：某个候选所在的「可能实心」连通块没覆盖全部区域
+ *       （必然有别的区域连不过来）→ 该候选不合法。
+ * R6/R7 只删候选，不直接落子，因此在空盘回放里不会凭空出现叉。
  *
  * 本文件同时被浏览器端和 Node 题库脚本使用，因此不依赖任何运行时模块。
  */
@@ -82,6 +92,8 @@ export interface LitsContext {
   regionCells: number[][]
   neighborPairs: Array<[number, number]>
   windows: number[][]
+  /** 每格所在的 2×2 窗口编号（用于候选级 2×2 检查） */
+  cellWindows: number[][]
 }
 
 export interface Deduction {
@@ -100,6 +112,10 @@ export interface LogicOutcome {
   nodes: number
   usedProbe: boolean
   usedSearch: boolean
+  /** 反证探测次数（逐候选 trial 传播记 1） */
+  probes: number
+  /** 兜底回溯搜索节点数 */
+  searchNodes: number
 }
 
 export interface SolveOutcome {
@@ -289,8 +305,12 @@ export function makeContext(regions: number[], w: number, h: number): LitsContex
       windows.push(quad)
     }
   }
+  const cellWindows: number[][] = Array.from({ length: n }, () => [])
+  for (let wi = 0; wi < windows.length; wi++) {
+    for (const i of windows[wi]!) cellWindows[i]!.push(wi)
+  }
 
-  return { w, h, n, regions, outside, regionCount, regionCells, neighborPairs, windows }
+  return { w, h, n, regions, outside, regionCount, regionCells, neighborPairs, windows, cellWindows }
 }
 
 /* ────────────────────────── 候选域 ────────────────────────── */
@@ -506,6 +526,94 @@ export function propagateDomains(
         }
         if (!keep.length) return false
       }
+    }
+
+    // —— R6/R7：候选级剪枝（不直接落子，只删候选；删完下一轮继续传播） ——
+    const possible = new Uint8Array(n)
+    for (let i = 0; i < n; i++) if (!forcedEmpty[i] && !ctx.outside[i]) possible[i] = 1
+    const compId = new Int32Array(n).fill(-1)
+    let compCount = 0
+    const stack2: number[] = []
+    for (let start = 0; start < n; start++) {
+      if (compId[start] >= 0 || !possible[start]) continue
+      compId[start] = compCount
+      stack2.length = 0
+      stack2.push(start)
+      while (stack2.length) {
+        const i = stack2.pop()!
+        const x = i % w
+        const y = Math.floor(i / w)
+        if (x > 0 && possible[i - 1] && compId[i - 1]! < 0) {
+          compId[i - 1] = compCount
+          stack2.push(i - 1)
+        }
+        if (x + 1 < w && possible[i + 1] && compId[i + 1]! < 0) {
+          compId[i + 1] = compCount
+          stack2.push(i + 1)
+        }
+        if (y > 0 && possible[i - w] && compId[i - w]! < 0) {
+          compId[i - w] = compCount
+          stack2.push(i - w)
+        }
+        if (y + 1 < ctx.h && possible[i + w] && compId[i + w]! < 0) {
+          compId[i + w] = compCount
+          stack2.push(i + w)
+        }
+      }
+      compCount++
+    }
+    // 每个「可能实心连通块」覆盖了多少个区域（每个区域必须至少有一格能在最终连通块里）
+    const regionCompPresence: Array<Set<number>> = []
+    for (let r = 0; r < regionCount; r++) {
+      const set = new Set<number>()
+      for (const i of regionCells[r]!) {
+        if (possible[i]) set.add(compId[i]!)
+      }
+      regionCompPresence.push(set)
+    }
+    const compRegionCount = new Int32Array(compCount)
+    for (const set of regionCompPresence) for (const cid of set) compRegionCount[cid]!++
+    // 候选级 2×2：cand 的 4 格 + 已确定实心格不能凑出完整 2×2
+    const filledMark = new Uint8Array(n)
+    for (let i = 0; i < n; i++) if (forcedFilled[i]) filledMark[i] = 1
+    const candidateBad2x2 = (cand: Candidate): boolean => {
+      for (const i of cand.cells) filledMark[i] = 1
+      let bad = false
+      for (const i of cand.cells) {
+        for (const wi of ctx.cellWindows[i]!) {
+          const quad = windows[wi]!
+          if (
+            filledMark[quad[0]!] &&
+            filledMark[quad[1]!] &&
+            filledMark[quad[2]!] &&
+            filledMark[quad[3]!]
+          ) {
+            bad = true
+            break
+          }
+        }
+        if (bad) break
+      }
+      for (const i of cand.cells) filledMark[i] = forcedFilled[i] ? 1 : 0
+      return bad
+    }
+    for (let r = 0; r < regionCount; r++) {
+      const before = domains[r]!.length
+      if (before <= 1) continue
+      const keep: Candidate[] = []
+      for (const cand of domains[r]!) {
+        const cid = compId[cand.cells[0]!]!
+        // R7：候选必须能和所有其它区域的某条候选连成一片
+        if (cid < 0 || compRegionCount[cid] !== regionCount) continue
+        // R6：候选不能与已确定实心格凑出 2×2
+        if (candidateBad2x2(cand)) continue
+        keep.push(cand)
+      }
+      if (keep.length !== before) {
+        domains[r] = keep
+        changed = true
+      }
+      if (!keep.length) return false
     }
   }
 
@@ -970,6 +1078,8 @@ export function planFromState(
     nodes: 0,
     usedProbe: false,
     usedSearch: false,
+    probes: 0,
+    searchNodes: 0,
   }
 
   for (let r = 0; r < ctx.regionCount; r++) if (!domains[r]!.length) return empty
@@ -1028,6 +1138,7 @@ export function planFromState(
 
   let solution: number[] | null = null
   let saturated = false
+  let fallbackNodes = 0
 
   if (allRecorded(ctx, recorded)) {
     solution = solutionFromDomains(ctx, domains)
@@ -1040,6 +1151,7 @@ export function planFromState(
 
   if (!solution) {
     const fallback = solveDomains(ctx, domains, maxNodes)
+    fallbackNodes = fallback.nodes
     if (!fallback.ok || !fallback.solution) return empty
     solution = fallback.solution
     // 为尚未记录的区域补上最终形状
@@ -1067,6 +1179,8 @@ export function planFromState(
     nodes: 0,
     usedProbe: probeUsed,
     usedSearch: !saturated,
+    probes,
+    searchNodes: fallbackNodes,
   }
 }
 

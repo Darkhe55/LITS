@@ -4,7 +4,7 @@
  * 回放严格基于「当前已经显示出来的盘面」触发规则：
  *   1. 枚举区域候选
  *   2. 2×2 三格可见实心 → 第四格标叉
- *   3. 同型骨牌不能接触（内部剪枝，不直接落子）
+ *   3. 同型骨牌不能接触 + 候选级 2×2 / 连通剪枝（内部剪枝，不直接落子）
  *   4. 全局连通性 → 被隔断的格子标叉
  *   5. 候选域收缩 → 确定实心 / 标叉
  *   6. 反证探测
@@ -12,6 +12,7 @@
  *
  * 2×2 不会使用求解器内部的“隐藏必然填色”，否则空盘上会凭空出现叉。
  * 因此空盘通常先由第 5 条给出第一批确定实心，下一轮第 2 条才开始标叉。
+ * 第 3 条里的候选级剪枝只是缩小候选集合，不会直接产生回放帧。
  */
 
 import type { GameState, LogicPlan, Move, PlaybackFrame, Puzzle } from '../core/types'
@@ -24,17 +25,30 @@ import {
   makeContext,
   planFromState,
   type Deduction,
-} from './engine'
+} from './engine.ts'
 
-export function planLogicSolve(puzzle: Puzzle, initialState: GameState): LogicPlan {
+/** 逻辑回放计划 + 审计计数（计数不影响回放内容） */
+export interface LitsLogicPlan extends LogicPlan {
+  /** 反证探测次数 */
+  probes: number
+  /** 兜底回溯搜索节点数 */
+  searchNodes: number
+  /** 按规则编号统计的推导帧数 */
+  ruleFrames: Record<number, number>
+}
+
+export function planLogicSolve(puzzle: Puzzle, initialState: GameState): LitsLogicPlan {
   const p = asLitsPuzzle(puzzle)
   const s = asLitsState(initialState)
-  const emptyPlan: LogicPlan = {
+  const emptyPlan: LitsLogicPlan = {
     puzzleId: p.id,
     frames: [],
     finalState: null,
     ruleSteps: 0,
     saturated: false,
+    probes: 0,
+    searchNodes: 0,
+    ruleFrames: {},
   }
 
   if (p.regions.length !== p.width * p.height) return emptyPlan
@@ -53,6 +67,7 @@ export function planLogicSolve(puzzle: Puzzle, initialState: GameState): LogicPl
   }
 
   const frames: PlaybackFrame[] = []
+  const ruleFrames: Record<number, number> = {}
   const display = s.cells.slice()
   let lastRule = -1
   let streak = 0
@@ -70,6 +85,7 @@ export function planLogicSolve(puzzle: Puzzle, initialState: GameState): LogicPl
     const move: Move = { index, from: display[index] ?? EMPTY, to: value }
     display[index] = value
     frames.push({ rule, label, move, streak })
+    ruleFrames[rule] = (ruleFrames[rule] ?? 0) + 1
     return true
   }
 
@@ -151,5 +167,8 @@ export function planLogicSolve(puzzle: Puzzle, initialState: GameState): LogicPl
     finalState,
     ruleSteps: frames.length,
     saturated: outcome.saturated,
+    probes: outcome.probes,
+    searchNodes: outcome.searchNodes,
+    ruleFrames: { ...ruleFrames },
   }
 }
