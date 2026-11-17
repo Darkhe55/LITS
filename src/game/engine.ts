@@ -320,13 +320,21 @@ export function buildDomains(ctx: LitsContext, filled: ArrayLike<number>): Candi
   for (let r = 0; r < ctx.regionCount; r++) {
     const cells = ctx.regionCells[r]!
     const must: number[] = []
-    for (const i of cells) if (filled[i] === FILLED) must.push(i)
+    const blocked: number[] = []
+    for (const i of cells) {
+      // 当前盘面就是工作盘面的起点：玩家已涂实心的格子必须属于本区域的骨牌，
+      // 玩家已标叉的格子必然不属于骨牌（CROSS 标记也作为已知约束写入）
+      if (filled[i] === FILLED) must.push(i)
+      else if (filled[i] === CROSS) blocked.push(i)
+    }
     if (must.length > 4) {
       domains.push([])
       continue
     }
-    const candidates = enumerateCandidates(cells, ctx.w).filter((cand) =>
-      must.every((i) => cand.cells.includes(i)),
+    const candidates = enumerateCandidates(cells, ctx.w).filter(
+      (cand) =>
+        must.every((i) => cand.cells.includes(i)) &&
+        blocked.every((i) => !cand.cells.includes(i)),
     )
     domains.push(candidates)
   }

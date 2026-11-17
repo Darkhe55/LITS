@@ -10,6 +10,11 @@
  *   6. 反证探测
  *   7. 仍卡住时才回溯
  *
+ * 回放从「当前盘面」开始：当前格子（实心 FILLED / 标叉 CROSS）都作为工作盘面的
+ * 已知约束写入候选域（buildDomains），回放帧的 from 也取当前值，不会覆盖已有标记。
+ * 只有当玩家标记与规则矛盾（候选域被清空）时，才退回只看题面的旧路径，
+ * 并用规则 7 帧纠正错误的实心/标叉。
+ *
  * 2×2 不会使用求解器内部的“隐藏必然填色”，否则空盘上会凭空出现叉。
  * 因此空盘通常先由第 5 条给出第一批确定实心，下一轮第 2 条才开始标叉。
  * 第 3 条里的候选级剪枝只是缩小候选集合，不会直接产生回放帧。
@@ -55,7 +60,12 @@ export function planLogicSolve(puzzle: Puzzle, initialState: GameState): LitsLog
   for (const r of p.regions) if (r < 0) return emptyPlan
 
   const ctx = makeContext(p.regions, p.width, p.height)
-  const outcome = planFromState(ctx, s.cells)
+  // 从当前盘面开始推：玩家已涂实心 / 已标叉都会写进候选域；矛盾时退回只看题面
+  let outcome = planFromState(ctx, s.cells)
+  const hasExtraMarks = s.cells.some((v, i) => v !== (s.givens[i] ?? EMPTY))
+  if ((!outcome.ok || !outcome.solution) && hasExtraMarks) {
+    outcome = planFromState(ctx, s.givens)
+  }
   if (!outcome.ok || !outcome.solution) return emptyPlan
   const solution = outcome.solution
 
@@ -141,16 +151,20 @@ export function planLogicSolve(puzzle: Puzzle, initialState: GameState): LitsLog
   // 规则 6：反证探测
   for (const d of byRule.get(6) ?? []) apply(d)
 
-  // 规则 7：仍未知的实心格用回溯结果补完
+  // 规则 7：仍未知的实心格用回溯结果补完；玩家标错/漏标的格子也在这里对齐
   for (let i = 0; i < display.length; i++) {
-    if (solution[i] === FILLED && display[i] !== FILLED) {
-      emit(i, FILLED, 7, '回溯试探：该格最终为实心')
+    if (solution[i] === FILLED) {
+      if (display[i] !== FILLED) emit(i, FILLED, 7, '回溯试探：该格最终为实心')
+    } else if (display[i] === FILLED && (s.givens[i] ?? EMPTY) === EMPTY) {
+      // 玩家在非解格上涂了实心（只可能出现在「退回只看题面」的路径）：补一帧标叉
+      emit(i, CROSS, 7, '回溯试探：该格最终不能放骨牌')
     }
   }
 
   const finalCells = display.slice()
   for (let i = 0; i < finalCells.length; i++) {
     if (solution[i] === FILLED) finalCells[i] = FILLED
+    else if (finalCells[i] === FILLED && (s.givens[i] ?? EMPTY) === EMPTY) finalCells[i] = CROSS
   }
 
   const finalState = {
